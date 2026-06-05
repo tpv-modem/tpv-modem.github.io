@@ -414,30 +414,40 @@ async function startMic(){
     SM.ensureContext();
     if (SM.context.state === 'suspended') await SM.context.resume();
     micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation:false, autoGainControl:false, noiseSuppression:false }
+      audio: {
+        echoCancellation:false,
+        autoGainControl:false,
+        noiseSuppression:false,
+        channelCount:1
+      }
     });
     micSource = SM.context.createMediaStreamSource(micStream);
-    const BUF = 1024;
+    // ★ iPhone Safari 等で安定動作させるため 4096 を使用（元のSound Modemと同じ）
+    const BUF = 4096;
     micNode = SM.context.createScriptProcessor(BUF, 1, 1);
     micNode.onaudioprocess = (e)=>{
       const data = e.inputBuffer.getChannelData(0);
       // level meter (peak)
       let peak = 0;
-      for (let i=0; i<data.length; i++){
+      for (let i=0; i<data.length; i+=16){
         const v = Math.abs(data[i]); if (v>peak) peak=v;
       }
-      meterBar.style.width = Math.min(100, peak*200) + '%';
+      meterBar.style.width = Math.min(100, peak*140) + '%';
       // ★ TXゲート: 自分の送信中はデコードしない（自己受信防止）
       if (txGate) return;
-      const txt = SM.decodeFromFloatChunk(data);
-      if (txt){
-        // チャンネル一致時だけログとLEDを反応させる
-        if (txt.charAt(0) === CH){
-          ledrx.classList.add('rx','blink');
-          setStatus('RECEIVED · CH'+CH+' · '+txt.length+' chars','ok');
-          setTimeout(()=>ledrx.classList.remove('blink','rx'), 600);
+      try{
+        const txt = SM.decodeFromFloatChunk(data);
+        if (txt){
+          // チャンネル一致時だけログとLEDを反応させる
+          if (txt.charAt(0) === CH){
+            ledrx.classList.add('rx','blink');
+            setStatus('RECEIVED · CH'+CH+' · '+txt.length+' chars','ok');
+            setTimeout(()=>ledrx.classList.remove('blink','rx'), 600);
+          }
+          addRxRow(txt);
         }
-        addRxRow(txt);
+      } catch(decodeErr){
+        // デコードエラーは無視（次のチャンクで再試行される）
       }
     };
     micSource.connect(micNode);
