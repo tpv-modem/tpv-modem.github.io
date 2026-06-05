@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="ja"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Telephonovision Sound Modem</title>
+<link rel="stylesheet" href="style.css">
+</head><body><div class="wrap">
+  <div class="win">
+    <div class="titlebar">
+      <span class="ico"></span>
+      <span class="title">Telephonovision Sound Modem</span>
+    </div>
+    <div class="body">
+      <span class="brand"><span class="blue">Telephono</span>vision</span>
+      <div class="subtitle"><b>Sound Modem</b> — テキストやお絵描きを音声で送受信</div>
+      <hr class="inset">
+
+      <!-- channel selector (共通) -->
+      <div class="chanRow">
+        <label for="chan">CHANNEL:</label>
+        <select id="chan" class="chan">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="7">7</option>
+          <option value="8">8</option>
+          <option value="9">9</option>
+        </select>
+        <span style="font-size:11px; color:#404040">送信側と受信側が同じチャンネルに合わせている必要があります</span>
+      </div>
+
+      <div class="split">
+        <!-- ============ SEND ============ -->
+        <div class="pane">
+          <div class="paneTitle"><span>▶</span>SEND</div>
+
+          <!-- mode selector -->
+          <div class="modeRow">
+            <button class="modeBtn active" data-mode="text">▤ TEXT</button>
+            <button class="modeBtn" data-mode="draw">▦ DRAW</button>
+          </div>
+
+          <!-- TEXT pane -->
+          <div id="textPane">
+            <p class="label">MESSAGE:</p>
+            <input id="msg" type="text" maxlength="200" placeholder="送りたい言葉を入力" value="">
+            <div class="cnt" id="cnt">0 / 98 bytes</div>
+          </div>
+
+          <!-- DRAW pane -->
+          <div id="drawPane" style="display:none">
+            <p class="label">DRAW (24×24 pixel · 黒で塗る):</p>
+            <div id="grid" class="pxgrid"></div>
+            <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap">
+              <button id="clear" class="btn">CLEAR</button>
+              <button id="invert" class="btn">INVERT</button>
+            </div>
+            <div class="cnt" id="cntImg">24×24 px · 98 / 98 bytes</div>
+          </div>
+
+          <div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap">
+            <button id="send" class="btn primary">▶ TRANSMIT</button>
+          </div>
+        </div>
+
+        <!-- ============ RECEIVE ============ -->
+        <div class="pane">
+          <div class="paneTitle"><span>◉</span>RECEIVE</div>
+
+          <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center">
+            <button id="micBtn" class="btn">■ MUTE MIC</button>
+            <button id="allowMic" class="btn" title="マイクの許可ダイアログを呼び出します">🎤 マイクを許可</button>
+            <button id="clearLog" class="btn">CLEAR LOG</button>
+          </div>
+          <div style="font-size:11px; color:#404040; margin-top:4px">
+            ※ マイクが反応しないときは <span class="kbd">🎤 マイクを許可</span> を押してください
+          </div>
+
+          <div class="meter"><div id="meterBar"></div></div>
+
+          <p class="label">RECEIVED:</p>
+          <div id="rxOut" class="rxOut"><span class="empty">…マイク起動中。近くで鳴る音を待っています。</span></div>
+        </div>
+      </div>
+
+      <hr class="inset">
+      <div class="sunken">
+        <b>使い方:</b> 同じ部屋にいる仲間と同じ <span class="kbd">CHANNEL</span> を合わせて開く。マイクは自動でONになり常時受信待機。片方で <span class="kbd">TRANSMIT</span> を押すと「ピー、ヒョロロ」が鳴り、もう片方が文字／ドット絵に戻します。<br>
+        <b>※ 送信中は自分のマイクが自動でゲートされる</b>ので、自分の音を自分で拾うことはありません。<br>
+        <b>※ チャンネルが違うメッセージは無視されます。</b> 同じ場にA組とB組がいれば CH1 / CH2 と分ければ混線しません（ただし全員が同じ空気を共有しているので、送信は順番で）。<br>
+        <b>※ 打ち込んだ内容はネットに送られません。</b> ブラウザの中で音に変換 → 空中を音で届ける → 受信側のブラウザの中で音を文字に戻す、それだけ。サーバもクラウドも使いません。
+      </div>
+    </div>
+    <div class="statusbar">
+      <span><span id="ledtx" class="led"></span><b>TX</b></span>
+      <span><span id="ledrx" class="led"></span><b>RX</b></span>
+      <span><span class="chanTag" id="chanTag">CH 1</span></span>
+      <span id="status" class="grow"><b>READY · LOADING LIBRARY…</b></span>
+      <span><b>NO SERVER · DATA STAYS LOCAL</b></span>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/ggwave/ggwave.js"></script>
+<script src="app.js"></script>
+<script>
+// ============================================================
+// TELEPHONOVISION Sound QR Code — single-page TX + RX
+// ネット未使用。同じ空間にいる端末同士が音だけで会話する。
+// 内部ペイロード形式: <CH:1byte 1-9> <TYPE:1byte 'T'|'I'> <BODY>
+//   TEXT : "1T" + UTF-8テキスト  (BODY 上限 98 byte)
+//   IMAGE: "1I" + base64(72 byte) = 96 char  (合計 98 byte)
+// ============================================================
+const TOTAL_BYTES = 100;
+const HEADER_BYTES = 2;                 // <CH><TYPE>
+const MAX_BODY = TOTAL_BYTES - HEADER_BYTES;  // 98
+const GRID_SIZE = 24;
+const IMG_BYTES = GRID_SIZE*GRID_SIZE/8;       // 72 bytes raw
+// base64(72) = 96 chars, header(2) + 96 = 98 → 上限内
+
+const statusEl   = document.getElementById('status');
+const msgEl      = document.getElementById('msg');
+const cntEl      = document.getElementById('cnt');
+const sendBtn    = document.getElementById('send');
+const ledtx      = document.getElementById('ledtx');
+const ledrx      = document.getElementById('ledrx');
+const textPane   = document.getElementById('textPane');
+const drawPane   = document.getElementById('drawPane');
+const gridEl     = document.getElementById('grid');
+const micBtn     = document.getElementById('micBtn');
+const allowMicBtn= document.getElementById('allowMic');
+const clearLogBtn= document.getElementById('clearLog');
+const rxOut      = document.getElementById('rxOut');
+const meterBar   = document.getElementById('meterBar');
+const chanSel    = document.getElementById('chan');
+const chanTag    = document.getElementById('chanTag');
+
+let CH = '1';
+chanSel.addEventListener('change', ()=>{
+  CH = chanSel.value;
+  chanTag.textContent = 'CH ' + CH;
+});
+
+function setStatus(t, c){ statusEl.innerHTML = '<b class="'+(c||'')+'">'+t+'</b>'; }
+function byteLen(s){ return new TextEncoder().encode(s).length; }
+function nowStamp(){
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());
+}
+
+// =============== Mode tabs ===============
+let mode = 'text';
+document.querySelectorAll('.modeBtn').forEach(b => {
+  b.addEventListener('click', ()=>{
+    document.querySelectorAll('.modeBtn').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    mode = b.dataset.mode;
+    textPane.style.display = (mode==='text') ? '' : 'none';
+    drawPane.style.display = (mode==='draw') ? '' : 'none';
+    refreshSendBtn();
+  });
+});
+
+// =============== TEXT counter ===============
+function updCnt(){
+  const n = byteLen(msgEl.value);
+  const cls = (n > MAX_BODY) ? 'over' : (n > MAX_BODY * 0.8) ? 'warn' : '';
+  cntEl.className = 'cnt ' + cls;
+  cntEl.textContent = n + ' / ' + MAX_BODY + ' bytes' + (n > MAX_BODY ? '  ⚠ 容量オーバー' : '');
+  refreshSendBtn();
+}
+msgEl.addEventListener('input', updCnt); updCnt();
+
+// =============== DRAW grid ===============
+const grid = Array.from({length:GRID_SIZE}, ()=>Array(GRID_SIZE).fill(false));
+let painting = false, paintOn = true;
+
+function renderGrid(){
+  gridEl.innerHTML = '';
+  for (let y=0; y<GRID_SIZE; y++){
+    for (let x=0; x<GRID_SIZE; x++){
+      const c = document.createElement('div');
+      c.className = 'pxcell' + (grid[y][x] ? ' on' : '');
+      c.dataset.x = x; c.dataset.y = y;
+      gridEl.appendChild(c);
+    }
+  }
+}
+renderGrid();
+
+function paintCell(el){
+  if (!el || !el.classList || !el.classList.contains('pxcell')) return;
+  const x = +el.dataset.x, y = +el.dataset.y;
+  grid[y][x] = paintOn;
+  el.classList.toggle('on', paintOn);
+}
+gridEl.addEventListener('mousedown', (e)=>{
+  if (!e.target.classList.contains('pxcell')) return;
+  const x = +e.target.dataset.x, y = +e.target.dataset.y;
+  paintOn = !grid[y][x];
+  painting = true;
+  paintCell(e.target);
+  e.preventDefault();
+});
+gridEl.addEventListener('mouseover', (e)=>{ if (painting) paintCell(e.target); });
+window.addEventListener('mouseup', ()=>{ painting = false; });
+gridEl.addEventListener('touchstart', (e)=>{
+  const t = e.touches[0]; if(!t) return;
+  const el = document.elementFromPoint(t.clientX, t.clientY);
+  if (!el || !el.classList.contains('pxcell')) return;
+  const x = +el.dataset.x, y = +el.dataset.y;
+  paintOn = !grid[y][x];
+  painting = true;
+  paintCell(el);
+  e.preventDefault();
+}, {passive:false});
+gridEl.addEventListener('touchmove', (e)=>{
+  if (!painting) return;
+  const t = e.touches[0]; if(!t) return;
+  paintCell(document.elementFromPoint(t.clientX, t.clientY));
+  e.preventDefault();
+}, {passive:false});
+window.addEventListener('touchend', ()=>{ painting = false; });
+
+document.getElementById('clear').addEventListener('click', ()=>{
+  for (let y=0; y<GRID_SIZE; y++) for (let x=0; x<GRID_SIZE; x++) grid[y][x] = false;
+  renderGrid();
+});
+document.getElementById('invert').addEventListener('click', ()=>{
+  for (let y=0; y<GRID_SIZE; y++) for (let x=0; x<GRID_SIZE; x++) grid[y][x] = !grid[y][x];
+  renderGrid();
+});
+
+// =============== Encode image to body ===============
+function gridToBody(){
+  const bytes = new Uint8Array(IMG_BYTES);
+  for (let y=0; y<GRID_SIZE; y++){
+    for (let x=0; x<GRID_SIZE; x++){
+      if (grid[y][x]){
+        const idx = y*GRID_SIZE + x;
+        bytes[idx >> 3] |= 1 << (7 - (idx & 7));
+      }
+    }
+  }
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);  // 96 chars
+}
+// 完全なペイロード "<CH><TYPE><body>"
+function buildPayload(){
+  const type = (mode === 'text') ? 'T' : 'I';
+  const body = (mode === 'text') ? msgEl.value : gridToBody();
+  return CH + type + body;
+}
+function refreshSendBtn(){
+  if (mode === 'text'){
+    const n = byteLen(msgEl.value);
+    sendBtn.disabled = (n === 0 || n > MAX_BODY);
+  } else {
+    sendBtn.disabled = false;
+  }
+}
+
+// =============== Library init ===============
+SM.init()
+  .then(()=>{ setStatus('READY','ok'); refreshSendBtn(); /* マイクは自動起動 */ startMic(); })
+  .catch(e=>setStatus('LIB ERROR · '+e,'err'));
+
+// =============== Send (direct audio playback) ===============
+// TXゲート: 送信中(+短い余韻)は受信デコードを止める
+//   → 自分の音を自分で拾わない
+let txGate = false;
+let txGateClearTimer = null;
+
+sendBtn.addEventListener('click', async ()=>{
+  if (!SM.instance && !await SM.init().catch(()=>null)){
+    setStatus('NOT READY','warn'); return;
+  }
+  const body = (mode === 'text') ? msgEl.value : gridToBody();
+  if (mode==='text' && !body.length){ setStatus('PAYLOAD EMPTY','warn'); return; }
+  const bodyN = byteLen(body);
+  if (bodyN > MAX_BODY){
+    setStatus('容量オーバー · ' + bodyN + ' / ' + MAX_BODY + ' bytes','err'); return;
+  }
+  const payload = buildPayload();
+  ledtx.classList.add('tx','blink');
+  setStatus('TRANSMITTING · CH'+CH+'…','warn');
+
+  // ★ TXゲート ON: 受信デコードを一時停止
+  txGate = true;
+  if (txGateClearTimer){ clearTimeout(txGateClearTimer); txGateClearTimer=null; }
+
+  try{
+    const r = SM.playText(payload, 15);
+    const kind = (mode==='draw') ? 'IMAGE' : 'TEXT';
+    setStatus('PLAYING · CH'+CH+' · '+kind+' · '+byteLen(payload)+' bytes · '+r.durationSec.toFixed(1)+' sec','ok');
+    // ★ 自分の送信内容もログに表示
+    addRxRow(payload, { self:true });
+    // 再生時間 + 余韻でゲート解除＆LED消灯
+    const releaseMs = Math.ceil(r.durationSec*1000) + 600;
+    txGateClearTimer = setTimeout(()=>{
+      txGate = false;
+      txGateClearTimer = null;
+      ledtx.classList.remove('blink','tx');
+      if (listening) setStatus('LISTENING · CH'+CH+'…','ok');
+      else setStatus('READY','ok');
+    }, releaseMs);
+  } catch(e){
+    txGate = false;
+    setStatus('TX FAILED · '+e,'err');
+    ledtx.classList.remove('blink','tx');
+  }
+});
+
+// =============== Receive (mic listen) ===============
+let micStream=null, micNode=null, micSource=null, listening=false;
+
+// 受信ペイロード "<CH><TYPE><body>" をパースして表示
+// opts.self=true なら自分の送信としてスタイル
+function addRxRow(payload, opts){
+  opts = opts || {};
+  const self = !!opts.self;
+  if (!payload || payload.length < 2) return;
+
+  const inCh   = payload.charAt(0);
+  const inType = payload.charAt(1);
+  const body   = payload.slice(2);
+
+  // チャンネル不一致は無音で破棄 (自分のは常に表示)
+  if (!self && inCh !== CH) return;
+  // 有効なタイプでなければ無視
+  if (inType !== 'T' && inType !== 'I') return;
+
+  // 「empty」プレースホルダ消す
+  const empty = rxOut.querySelector('.empty');
+  if (empty) empty.remove();
+
+  const row = document.createElement('div');
+  row.className = 'row' + (self ? ' self' : ' peer');
+  const tag = document.createElement('span');
+  tag.className = 'who';
+  tag.textContent = self ? '▶ YOU ' : '◀ PEER';
+  row.appendChild(tag);
+  const ts = document.createElement('span');
+  ts.className = 'ts';
+  ts.textContent = ' ['+nowStamp()+'] CH'+inCh+' · ';
+  row.appendChild(ts);
+
+  if (inType === 'I'){
+    // 画像
+    const b64 = body.replace(/[^A-Za-z0-9+/=]/g, '');
+    let bin;
+    try{
+      const padded = b64 + '='.repeat((4 - b64.length%4) % 4);
+      const raw = atob(padded);
+      bin = new Uint8Array(raw.length);
+      for (let i=0; i<raw.length; i++) bin[i] = raw.charCodeAt(i);
+    } catch(e){
+      const t = document.createElement('span');
+      t.textContent = '[image decode failed] '+body;
+      row.appendChild(t);
+      rxOut.appendChild(row); rxOut.scrollTop = rxOut.scrollHeight;
+      return;
+    }
+    const NEED = GRID_SIZE*GRID_SIZE/8;
+    if (bin.length < NEED){
+      const t = document.createElement('span');
+      t.textContent = '[image truncated: '+bin.length+'/'+NEED+'B]';
+      row.appendChild(t);
+      rxOut.appendChild(row); rxOut.scrollTop = rxOut.scrollHeight;
+      return;
+    }
+    const lbl = document.createElement('div');
+    lbl.textContent = 'IMAGE 24×24';
+    row.appendChild(lbl);
+
+    const cv = document.createElement('canvas');
+    cv.width = GRID_SIZE; cv.height = GRID_SIZE;
+    const ctx = cv.getContext('2d');
+    const img = ctx.createImageData(GRID_SIZE, GRID_SIZE);
+    for (let y=0; y<GRID_SIZE; y++){
+      for (let x=0; x<GRID_SIZE; x++){
+        const idx = y*GRID_SIZE + x;
+        const bit = (bin[idx>>3] >> (7-(idx&7))) & 1;
+        const p = (y*GRID_SIZE + x) * 4;
+        const v = bit ? 0 : 255;
+        img.data[p]=v; img.data[p+1]=v; img.data[p+2]=v; img.data[p+3]=255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    row.appendChild(cv);
+  } else {
+    // テキスト
+    const t = document.createElement('span');
+    t.textContent = 'TEXT: '+body;
+    row.appendChild(t);
+  }
+  rxOut.appendChild(row);
+  rxOut.scrollTop = rxOut.scrollHeight;
+}
+
+clearLogBtn.addEventListener('click', ()=>{
+  rxOut.innerHTML = '<span class="empty">…ログをクリアしました。</span>';
+});
+
+async function startMic(){
+  if (listening) return;
+  try{
+    await SM.init();
+    SM.ensureContext();
+    if (SM.context.state === 'suspended') await SM.context.resume();
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation:false, autoGainControl:false, noiseSuppression:false }
+    });
+    micSource = SM.context.createMediaStreamSource(micStream);
+    const BUF = 1024;
+    micNode = SM.context.createScriptProcessor(BUF, 1, 1);
+    micNode.onaudioprocess = (e)=>{
+      const data = e.inputBuffer.getChannelData(0);
+      // level meter (peak)
+      let peak = 0;
+      for (let i=0; i<data.length; i++){
+        const v = Math.abs(data[i]); if (v>peak) peak=v;
+      }
+      meterBar.style.width = Math.min(100, peak*200) + '%';
+      // ★ TXゲート: 自分の送信中はデコードしない（自己受信防止）
+      if (txGate) return;
+      const txt = SM.decodeFromFloatChunk(data);
+      if (txt){
+        // チャンネル一致時だけログとLEDを反応させる
+        if (txt.charAt(0) === CH){
+          ledrx.classList.add('rx','blink');
+          setStatus('RECEIVED · CH'+CH+' · '+txt.length+' chars','ok');
+          setTimeout(()=>ledrx.classList.remove('blink','rx'), 600);
+        }
+        addRxRow(txt);
+      }
+    };
+    micSource.connect(micNode);
+    micNode.connect(SM.context.destination);  // ScriptProcessor must be connected
+    listening = true;
+    micBtn.textContent = '■ MUTE MIC';
+    micBtn.classList.add('on');
+    ledrx.classList.add('rx');
+    setStatus('LISTENING · CH'+CH+'…','ok');
+  } catch(e){
+    setStatus('MIC FAILED · '+e.message,'err');
+    micBtn.textContent = '▶ LISTEN';
+  }
+}
+function stopMic(){
+  try{ micNode && micNode.disconnect(); }catch(e){}
+  try{ micSource && micSource.disconnect(); }catch(e){}
+  try{ micStream && micStream.getTracks().forEach(t=>t.stop()); }catch(e){}
+  micNode = micSource = micStream = null;
+  listening = false;
+  micBtn.textContent = '▶ LISTEN';
+  micBtn.classList.remove('on');
+  ledrx.classList.remove('rx','blink');
+  meterBar.style.width = '0%';
+  setStatus('MIC MUTED','warn');
+}
+micBtn.addEventListener('click', ()=> listening ? stopMic() : startMic());
+
+// 🎤 マイク許可: ブラウザの許可ダイアログを明示的に呼び出すトリガー
+//    端末によっては自動起動でダイアログが出ないので、ユーザー操作で確実に出す
+allowMicBtn.addEventListener('click', async ()=>{
+  try{
+    await SM.init();
+    SM.ensureContext();
+    if (SM.context.state === 'suspended') await SM.context.resume();
+    if (listening){
+      // 既に許可済みで聴いてる場合は再起動して動作確認
+      stopMic();
+      await new Promise(r=>setTimeout(r,200));
+    }
+    setStatus('REQUESTING MIC ACCESS…','warn');
+    await startMic();
+  } catch(e){
+    setStatus('MIC ACCESS FAILED · '+(e && e.message ? e.message : e),'err');
+  }
+});
+</script>
+</body></html>
