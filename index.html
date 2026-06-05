@@ -147,6 +147,9 @@ const diagChunks = document.getElementById('diagChunks');
 const diagPeak   = document.getElementById('diagPeak');
 let chunkCount   = 0;
 let lastPeak     = 0;
+// 直近3秒のピークを保持
+let peakWindow   = [];   // [{t, peak}, ...]
+const PEAK_WIN_MS = 3000;
 
 let CH = '1';
 chanSel.addEventListener('change', ()=>{
@@ -447,11 +450,15 @@ async function startMic(){
       lastPeak = peak;
       meterBar.style.width = Math.min(100, peak*140) + '%';
       chunkCount++;
-      // 1秒おきくらいに診断更新
-      if ((chunkCount & 7) === 0){
-        diagChunks.textContent = 'chunks:' + chunkCount;
-        diagPeak.textContent = 'peak:' + lastPeak.toFixed(3);
-      }
+      // 3秒窓ピーク追跡
+      const now = Date.now();
+      peakWindow.push({ t: now, peak: peak });
+      while (peakWindow.length && (now - peakWindow[0].t) > PEAK_WIN_MS) peakWindow.shift();
+      let win3sMax = 0;
+      for (const e of peakWindow) if (e.peak > win3sMax) win3sMax = e.peak;
+      // 毎チャンク更新（送信中の瞬間ピークを逃さない）
+      diagChunks.textContent = 'chunks:' + chunkCount;
+      diagPeak.textContent = 'max3s:' + win3sMax.toFixed(3);
       // ★ TXゲート: 自分の送信中はデコードしない（自己受信防止）
       if (txGate) return;
       try{

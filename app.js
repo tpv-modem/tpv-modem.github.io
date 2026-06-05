@@ -39,7 +39,7 @@ window.SM = (() => {
   function playText(text, volume){
     ensureContext();
     if (context.state === 'suspended') context.resume();
-    const wave = ggwave.encode(instance, text, PROTOCOL, volume || 15);
+    const wave = ggwave.encode(instance, text, PROTOCOL, volume || 50);
     const f32 = convertTypedArray(wave, Float32Array);
     const ab = context.createBuffer(1, f32.length, context.sampleRate);
     ab.getChannelData(0).set(f32);
