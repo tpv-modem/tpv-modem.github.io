@@ -22,7 +22,8 @@ window.SM = (() => {
   }
   function ensureContext(){
     if (context) return context;
-    context = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+    // ★ サンプルレート未指定でデバイス任せ（iOSで48kHz強制すると不安定）
+    context = new (window.AudioContext || window.webkitAudioContext)();
     const p = ggwave.getDefaultParameters();
     p.sampleRateInp = context.sampleRate;
     p.sampleRateOut = context.sampleRate;

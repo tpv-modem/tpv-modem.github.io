@@ -80,6 +80,11 @@
           </div>
 
           <div class="meter"><div id="meterBar"></div></div>
+          <div id="diag" style="font-size:10px; color:#404040; font-family:var(--c-mono); margin:4px 0; line-height:1.4">
+            <span id="diagRate">SR:—</span> ·
+            <span id="diagChunks">chunks:0</span> ·
+            <span id="diagPeak">peak:0.00</span>
+          </div>
 
           <p class="label">RECEIVED:</p>
           <div id="rxOut" class="rxOut"><span class="empty">…マイク起動中。近くで鳴る音を待っています。</span></div>
@@ -137,6 +142,11 @@ const rxOut      = document.getElementById('rxOut');
 const meterBar   = document.getElementById('meterBar');
 const chanSel    = document.getElementById('chan');
 const chanTag    = document.getElementById('chanTag');
+const diagRate   = document.getElementById('diagRate');
+const diagChunks = document.getElementById('diagChunks');
+const diagPeak   = document.getElementById('diagPeak');
+let chunkCount   = 0;
+let lastPeak     = 0;
 
 let CH = '1';
 chanSel.addEventListener('change', ()=>{
@@ -422,9 +432,11 @@ async function startMic(){
       }
     });
     micSource = SM.context.createMediaStreamSource(micStream);
-    // ★ iPhone Safari 等で安定動作させるため 4096 を使用（元のSound Modemと同じ）
-    const BUF = 4096;
+    // ★ iPhone Safari 等で安定動作させるため大きめバッファを使用
+    const BUF = 8192;
     micNode = SM.context.createScriptProcessor(BUF, 1, 1);
+    diagRate.textContent = 'SR:' + Math.round(SM.context.sampleRate);
+    chunkCount = 0;
     micNode.onaudioprocess = (e)=>{
       const data = e.inputBuffer.getChannelData(0);
       // level meter (peak)
@@ -432,12 +444,21 @@ async function startMic(){
       for (let i=0; i<data.length; i+=16){
         const v = Math.abs(data[i]); if (v>peak) peak=v;
       }
+      lastPeak = peak;
       meterBar.style.width = Math.min(100, peak*140) + '%';
+      chunkCount++;
+      // 1秒おきくらいに診断更新
+      if ((chunkCount & 7) === 0){
+        diagChunks.textContent = 'chunks:' + chunkCount;
+        diagPeak.textContent = 'peak:' + lastPeak.toFixed(3);
+      }
       // ★ TXゲート: 自分の送信中はデコードしない（自己受信防止）
       if (txGate) return;
       try{
         const txt = SM.decodeFromFloatChunk(data);
         if (txt){
+          // 受信できた事実はチャンネル違いでも診断に出す
+          diagPeak.textContent = 'last:' + txt.substring(0, 20);
           // チャンネル一致時だけログとLEDを反応させる
           if (txt.charAt(0) === CH){
             ledrx.classList.add('rx','blink');
